@@ -7,7 +7,7 @@ import scipy.io as sio
 import pickle
 
 
-def new_vec(v_f, v=None, cell_num=3, al=.7, be=.3, v_a=-5, v_b=6):
+def new_vec(v_f, v=None, cell_num=3, al=.6, be=.4, v_a=-5, v_b=6):
     '''
     This function returns \alpha V + \beta V_f
     :param v_f: vector of flow
@@ -225,6 +225,15 @@ def label_img(img_lab, img_bin, color_=(0, 0, 255), lab=None):
 def for_show(img):
     if np.max(img) == 1:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) * 255
+    elif np.max(img) == 2:
+        img[img == 1] = 150
+        img[img == 2] = 255
+        img = cv2.cvtColor(np.uint8(img), cv2.COLOR_GRAY2BGR)
+    elif np.max(img) == 3:
+        img[img == 1] = 100
+        img[img == 2] = 180
+        img[img == 3] = 255
+        img = cv2.cvtColor(np.uint8(img), cv2.COLOR_GRAY2BGR)
     else:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
@@ -442,10 +451,12 @@ def ellipse_lab_move(labnd, v, center_, hw, theta):
     return new_lab
 
 
-def moving_ellipses(lab, dif_length=(1.1, 1.2), dif_theta=(-10, 10),
+def moving_ellipses(lab, dif_length=(1.15, 1.25), dif_theta=(-10, 10),
                     step=2, vec=(3, 4)):
     layered_lab, center_, hw, theta = make_layered_ellipse_image(lab)
-    plt.imshow(np.sum(layered_lab, axis=2))
+    np.save('Images/moving_simul/w/tall1/lab0.npy', layered_to_labeled(layered_lab))
+    plt.imshow(for_show(np.sum(layered_lab, axis=2)))
+    plt.savefig('Images/moving_simul/w/tall1/ms1-2.png')
     plt.show()
     growth = np.random.uniform(dif_length[0], dif_length[1], (len(hw), 1))
     hw[:, 0] = np.multiply(hw[:, 0], growth.transpose())
@@ -456,52 +467,55 @@ def moving_ellipses(lab, dif_length=(1.1, 1.2), dif_theta=(-10, 10),
     theta = theta + np.random.randint(dif_theta[0], dif_theta[1], l[2])
     nv = new_vec(v, cell_num=l[2])
     layered_lab = ellipse_lab_move(layered_lab, nv, center_, hw, theta)
-    plt.imshow(np.sum(layered_lab, axis=2))
+    plt.imshow(for_show(np.sum(layered_lab, axis=2)))
     plt.show()
     for cou in range(step):
         nv = vect_correct(layered_lab, nv)
         nv = new_vec(v, nv, cell_num=l[2])
         layered_lab = ellipse_lab_move(layered_lab, nv, center_, hw, theta)
-        plt.imshow(np.sum(layered_lab, axis=2))
+        plt.imshow(for_show(np.sum(layered_lab, axis=2)))
+        plt.savefig('Images/moving_simul/w/tall1/ms1-3.png')
         plt.show()
 
+    return layered_to_labeled(layered_lab)
 
 
 if __name__ == "__main__":
-    lab0 = np.load('ski30.npy').astype(np.uint8)
-    # lab0[lab0 == 57] = 56
-    # lab0[lab0 == 58] = 57
-    # lab0[lab0 == 59] = 58
-    lab1 = np.load('ski31.npy').astype(np.uint8)
-    img_seg0 = lab0.copy()
-    img_seg0[img_seg0 != 0] = 1
-    img_seg1 = lab1.copy()
-    img_seg1[img_seg1 != 0] = 1
+    # lab0 = np.load('ski30.npy').astype(np.uint8)
+    # # lab0[lab0 == 57] = 56
+    # # lab0[lab0 == 58] = 57
+    # # lab0[lab0 == 59] = 58
+    # lab1 = np.load('ski31.npy').astype(np.uint8)
+    # img_seg0 = lab0.copy()
+    # img_seg0[img_seg0 != 0] = 1
+    # img_seg1 = lab1.copy()
+    # img_seg1[img_seg1 != 0] = 1
     #
     # split_dictionary_ski31 = {29: [32, 37], 30: [33, 35], 39: [46, 47], 56: [61, 62]}
 
-    # mum = sio.loadmat('mum16pix')
-    # img_seg0 = mum['mum'][0][0][0, 0]
-    # img_seg0[img_seg0 > 1] = 0
-    # lab0 = label(img_seg0, connectivity=1)
-    #
-    # img_seg1 = mum['mum'][0][1][0, 0]
-    # img_seg1[img_seg1 > 1] = 0
-    # lab1 = label(img_seg1, connectivity=1)
+    mum = sio.loadmat('mum16pix')
+    img_seg0 = mum['mum'][0][0][0, 0]
+    img_seg0[img_seg0 > 1] = 0
+    lab0 = label(img_seg0, connectivity=1)
+
+    img_seg1 = mum['mum'][0][1][0, 0]
+    img_seg1[img_seg1 > 1] = 0
+    lab1 = label(img_seg1, connectivity=1)
 
     # spl_dic2_1_to_1 = {6: [7, 8], 8: [5, 15], 11: [14, 20], 14: [16, 19], 16: [21, 34], 13: [12, 17]}
     # spl_dic2_1_to_1 = {23: [32, 26], 32: [55, 42], 43: [52, 65], 49: [59, 60], 53: [66, 67], 59: [72, 76]}
     # spl_dic0_1_to_1 = {11: [12, 14], 15: [15, 30], 17: [16, 29], 18: [26, 31], 21: [25, 51], 32: [39, 60],
     #                    48: [65, 81], 58: [70, 79], 72: [89, 100]}
     # , 14:[11,17]}
-    plt.imshow(img_seg0)
+    plt.imshow(for_show(img_seg0))
+    plt.savefig('Images/moving_simul/w/tall1/ms1-1.png')
     plt.show()
-    moving_ellipses(lab0, step=5)
+    new_lab = moving_ellipses(lab0, step=5)
 
     # new_lab1 = move_without_split_rot(lab0, lab1, step=4)
     #
-    # np.save('Images/moving_simul/w/1/lab0.npy', lab0)
-    # np.save('Images/moving_simul/w/1/lab1.npy', new_lab1)
+    # np.save('Images/moving_simul/w/tall0/lab0.npy', lab0)
+    np.save('Images/moving_simul/w/tall1/lab1.npy', new_lab)
     #
     # with open('Images/moving_simul/3/rel_dic.pkl', 'wb') as f:
     #     pickle.dump(new_spl_dic, f, pickle.HIGHEST_PROTOCOL)

@@ -837,6 +837,47 @@ def total_cost_per_parameter_no_split(cen0, cen1, v0, v1, neigh0, neigh1,
     return w_cost, V_cost, same_s_cost, neigh_cost
 
 
+def weight_loss_one_seg(cent0, cent1, nei0, base, t_fun):
+    '''
+    This function gets these variable and computes:
+     \sum_{j\in \Omega_i}\frac{||C_{f(i)} - C_{f(j)}||}{||c_i - c_j||}
+     which is the part of the first element of the cost function.
+    :param cent0: centroid for image t=0 (I_0) (matrix of position of segments)
+    :param cent1:centroid for image t=1 (I_1) (matrix of position of segments)
+    :param nei0: neighbors of segment at t=0 (correspondent dictionary)
+    :param base: segment number in image t=0 (integer number)
+    :param t_fun: target function (dictionary)
+    :return: value of w_loss
+    '''
+
+    if len(nei0[base]) == 0:
+        return 0
+    w_loss = 0
+    for h in nei0[base]:
+        w_loss += w_centroid(cent1[t_fun[base][0] - 1], cent1[t_fun[h][0] - 1]) / \
+                  w_centroid(cent0[base - 1], cent0[h - 1])
+
+    return w_loss / len(nei0[base])
+
+
+def weight_loss(cent0, cent1, nei0, t_fun):
+    '''
+    This function compute first element of the cost function which is:
+    \sum_{i=1}^{N_0} \sum_{j\in \Omega_i}\frac{||C_{f(i)} - C_{f(j)}||}{||c_i - c_j||}
+    which is the parralel computation on weight_loss_one_seg function.
+    :param cent0: centroid for image t=0 (I_0) (matrix of position of segments)
+    :param cent1:centroid for image t=1 (I_1) (matrix of position of segments)
+    :param nei0: neighbors of segment at t=0 (correspondent dictionary)
+    :param t_fun: target function (dictionary)
+    :return: return value of w_cost
+    '''
+    w_cost = np.sum(list(map(lambda x: weight_loss_one_seg(cent0, cent1,
+                                                           nei0, x, t_fun),
+                             list(t_fun.keys()))))
+
+    return w_cost / len(t_fun)
+
+
 def new_parameter_cost_no_split(cen0, cen1, v0, v1, neigh0, neigh1,
                                       ta_fun, avg_neigh, n_pre=None, tau=.2):
     '''
@@ -863,8 +904,9 @@ def new_parameter_cost_no_split(cen0, cen1, v0, v1, neigh0, neigh1,
     N_0 = len(t_fun)
     nan_target, notnan_target = nan_or_not(t_fun)
 
-    # w_cost = w_centroid(cen0[np.array(list(notnan_target.keys())) - 1],
-    #                     cen1[np.array(list(notnan_target.values())) - 1]) / N_0
+    # coefficient of alpha0
+    w_cost = weight_loss(cen0, cen1, neigh0, t_fun)
+
     # coefficient of alpha1
     V_cost = v_cost_tau(notnan_target, v0, v1, tau) / N_0
 
@@ -874,7 +916,42 @@ def new_parameter_cost_no_split(cen0, cen1, v0, v1, neigh0, neigh1,
     # coefficient of alpha3
     neigh_cost = neighbor_cost(neigh0, neigh1, t_fun, notnan_target) / (avg_neigh * N_0)
 
-    return V_cost, same_s_cost, neigh_cost
+    return w_cost, V_cost, same_s_cost, neigh_cost
+
+
+def new_total_cost_no_split(cen0, cen1, v0, v1, neigh0, neigh1, ta_fun, avg_neigh,
+                            alpha_, tau=.2, n_pre=None):
+    # finding total cost for each epoch and return separate cost and total cost as
+    # output. Inputs are the same as d_cost.
+
+    t_fun = ta_fun.copy()
+
+    if n_pre is not None:
+        t_fun[n_pre[0]] = n_pre[1]
+        if n_pre[1] != n_pre[1]:
+            return np.infty, 0, 0, 0, 0
+
+    N_0 = len(t_fun)
+    notnan_target = t_fun.copy()
+
+
+    # coefficient of alpha0
+    w_cost = weight_loss(cen0, cen1, neigh0, t_fun)
+
+    # coefficient of alpha1
+    V_cost = v_cost_tau(notnan_target, v0, v1, tau) / N_0
+
+    # coefficient of alpha2
+    same_s_cost = predict_overlap(notnan_target, notnan_target, same_set=True) / N_0
+
+    # coefficient of alpha3
+    neigh_cost = neighbor_cost(neigh0, neigh1, t_fun, notnan_target) / (avg_neigh * N_0)
+
+    t_cost = alpha_[0] * w_cost + alpha_[1] * V_cost + alpha_[2] * same_s_cost +\
+             alpha_[3] * neigh_cost
+
+    return t_cost, w_cost, V_cost, same_s_cost, neigh_cost
+
 
 
 def find_target_function(img_seg0, img_seg1, lab0, lab1,
@@ -1079,8 +1156,8 @@ def find_target_function_no_split(img_seg0, img_seg1, lab0, lab1,
     target_function2 = target_function.copy()
 
     costs = np.zeros([iteration + 1, 5])
-    old_cost = total_cost_no_split(centroid0, centroid1, vec0, vec1, neighbors0,
-                          neighbors1, target_function, avg_neigh_num, al)
+    old_cost = new_total_cost_no_split(centroid0, centroid1, vec0, vec1, neighbors0_nonan,
+                                       neighbors1_nonan, target_function, avg_neigh_num, al)
     costs[0, :] = old_cost
 
     for inter_num in tqdm(range(iteration)):
@@ -1088,9 +1165,10 @@ def find_target_function_no_split(img_seg0, img_seg1, lab0, lab1,
             old_pred = target_function[num_]
             new_pred = choose_target_no_split(relation, num_, old_pred)
 
-            temp_cost = total_cost_no_split(centroid0, centroid1, vec0, vec1, neighbors0,
-                                            neighbors1, target_function,
-                                            avg_neigh_num, al, n_pre=[num_, new_pred])
+            temp_cost = new_total_cost_no_split(centroid0, centroid1, vec0,
+                                                vec1, neighbors0_nonan,
+                                                neighbors1_nonan, target_function,
+                                                avg_neigh_num, al, n_pre=[num_, new_pred])
 
             delta_cost = temp_cost[0] - old_cost[0]
 
@@ -1130,11 +1208,12 @@ def find_target_function_no_split(img_seg0, img_seg1, lab0, lab1,
         costs[inter_num + 1, :] = old_cost
 
         T = T * dT
+        print("in function find_target_function_no_split accuracy is :", acc_no_split(target_function))
 
-    ind_cost = cell_cost(centroid0, centroid1, vec0, vec1, neighbors0, neighbors1,
-                         target_function, relation, avg_neigh_num, al, spl=.1, tsh=1)
+    # ind_cost = cell_cost(centroid0, centroid1, vec0, vec1, neighbors0, neighbors1,
+    #                      target_function, relation, avg_neigh_num, al, spl=.1, tsh=1)
 
-    return target_function, target_function2, ind_cost
+    return target_function, target_function2
 
 
 def acc_no_split(t_fun):
@@ -1160,8 +1239,8 @@ if __name__ == "__main__":
     # img_seg1 = lab1.copy()
     # img_seg1[img_seg1 != 0] = 1
 
-    lab0 = np.load('Images/moving_simul/w/0/lab0.npy').astype(np.uint8)
-    lab1 = np.load('Images/moving_simul/w/0/lab1.npy').astype(np.uint8)
+    lab0 = np.load('Images/moving_simul/w/test/lab0.npy').astype(np.uint8)
+    lab1 = np.load('Images/moving_simul/w/test/lab1.npy').astype(np.uint8)
     img_seg0 = lab0.copy()
     img_seg0[img_seg0 != 0] = 1
     img_seg1 = lab1.copy()
@@ -1181,17 +1260,17 @@ if __name__ == "__main__":
     #     T = 100
     #     dT = 1/2
     #     iteration = 100
-    al = [.1, 100, 1000, 1]
-
-    tar1, tar2, each_cell_cost = find_target_function_no_split(img_seg0, img_seg1, lab0,
-                                                               lab1, al, split_rate=.1,
-                                                               treshhold_=1, iteration=200,
-                                                               T=100, dT=9 / 10)
+    # al = [0.28223388, 0.29470904, 0.08980623, 0.33325121]
+    # al = [0.30730242, 0.02118294, 0.47354079, 0.19797386]
+    al = [0.43029858, 0.06860031, 0.15977757, 0.34132334]
+    tar1, tar2 = find_target_function_no_split(img_seg0, img_seg1, lab0,
+                                               lab1, al, iteration=100,
+                                               T=100, dT=1/2)
         #
         # test_result[num, 3] = acc_no_split(tar1)
-        # num += 1
+        # num += 11
 
-
+    print(acc_no_split(tar1))
 # img0, img1, img_lab0, img_lab1, cent_chng, new_label_list = make_img(
 #     200, 7, save_add, spd=4, rtn=40,
 #     d_rtn=10, lg_=(6, 11), d_lg=3, brd=20, split=True)
